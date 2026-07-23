@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+.ipynb_checkpoints/
+.matplotlib/
+data/raw/*.csv
+data/processed/*.csv
+reports/figures/*.png
