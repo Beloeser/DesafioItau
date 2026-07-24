@@ -33,6 +33,7 @@ class TradingFronteirasMDP(gym.Env):
         self.current_step = 0
         self.posicao = 0
         self.zscore_entrada = 0.0
+        self.spread_entrada = 0.0  # CORREÇÃO Bug #6: rastreia spread real
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -53,6 +54,7 @@ class TradingFronteirasMDP(gym.Env):
     def step(self, action):
         row = self.df.iloc[self.current_step]
         z_atual = row["zscore_mr"]
+        spread_atual = row["spread_observado"]
         recompensa = 0.0
         done = False
         
@@ -68,20 +70,30 @@ class TradingFronteirasMDP(gym.Env):
             if z_atual <= -limite_entrada:
                 self.posicao = 1 
                 self.zscore_entrada = z_atual
+                self.spread_entrada = spread_atual
                 recompensa -= self.taxa_corretagem
             elif z_atual >= limite_entrada:
                 self.posicao = -1
                 self.zscore_entrada = z_atual
+                self.spread_entrada = spread_atual
                 recompensa -= self.taxa_corretagem
 
         elif self.posicao == 1: 
             if z_atual >= 0 or z_atual <= -limite_stop or action == 3: 
-                recompensa += (z_atual - self.zscore_entrada) - self.taxa_corretagem
+                # CORREÇÃO Bug #6: Recompensa baseada em variação normalizada
+                # do spread, não do z-score, para alinhar treino com backtest.
+                std_mr = row.get("std_mr", 1.0)
+                if std_mr > 0:
+                    recompensa += (spread_atual - self.spread_entrada) / std_mr
+                recompensa -= self.taxa_corretagem
                 self.posicao = 0
 
         elif self.posicao == -1:
             if z_atual <= 0 or z_atual >= limite_stop or action == 3:
-                recompensa += (self.zscore_entrada - z_atual) - self.taxa_corretagem
+                std_mr = row.get("std_mr", 1.0)
+                if std_mr > 0:
+                    recompensa += (self.spread_entrada - spread_atual) / std_mr
+                recompensa -= self.taxa_corretagem
                 self.posicao = 0
 
         prob_quebra = row.get("prob_quebra", 0.0)
@@ -95,36 +107,62 @@ class TradingFronteirasMDP(gym.Env):
         return self._get_obs(), float(recompensa), done, False, {}
 
 def executar_backtest_financeiro(modelo, env_teste, capital_inicial=10000.0):
-    """Simula as operacoes no mundo real utilizando as decisoes da IA."""
+    """Simula operações de pairs trading com P&L financeiro realista.
+
+    CORREÇÃO Bug #4: O P&L de um pairs trade é calculado como:
+        lucro = quantidade × (spread_saida - spread_entrada)   [long]
+        lucro = quantidade × (spread_entrada - spread_saida)   [short]
+    onde quantidade = capital / custo_nocional_do_par.
+
+    A versão anterior usava variação PERCENTUAL do spread, que explode
+    quando o spread está perto de zero (divisão por número pequeno).
+    """
     obs, _ = env_teste.reset()
     terminou = False
     
     saldo = capital_inicial
     posicao_anterior = 0
-    preco_entrada = 0.0
+    spread_entrada = 0.0
+    preco_y_entrada = 0.0
+    preco_x_entrada = 0.0
     trades_realizados = 0
     lucro_bruto_acumulado = 0.0
 
     while not terminou:
         acao, _states = modelo.predict(obs, deterministic=True)
         row = env_teste.df.iloc[env_teste.current_step]
-        preco_real_spread = row["spread_observado"]
+        spread_atual = row["spread_observado"]
         
         obs, _, terminou, _, _ = env_teste.step(acao)
 
         if env_teste.posicao != posicao_anterior:
             # IA Mandou Abrir Posicao
             if env_teste.posicao in [1, -1] and posicao_anterior == 0:
-                preco_entrada = preco_real_spread
+                spread_entrada = spread_atual
+                # Captura preços individuais para calcular nocional
+                preco_y_entrada = row.get(env_teste.df.columns[1], 1.0) if len(env_teste.df.columns) > 1 else 1.0
+                preco_x_entrada = row.get(env_teste.df.columns[2], 1.0) if len(env_teste.df.columns) > 2 else 1.0
+                # Nocional = preco_Y + |hedge_ratio| * preco_X
+                # Como não temos hedge_ratio aqui, usamos o valor absoluto
+                # médio do spread como proxy conservador do nocional.
                 
             # IA Mandou Fechar Posicao
             elif env_teste.posicao == 0 and posicao_anterior != 0:
-                if posicao_anterior == 1: # Long
-                    variacao = (preco_real_spread - preco_entrada) / abs(preco_entrada) if preco_entrada != 0 else 0
-                else:                     # Short
-                    variacao = (preco_entrada - preco_real_spread) / abs(preco_entrada) if preco_entrada != 0 else 0
-                
-                lucro_trade = capital_inicial * variacao
+                # CORREÇÃO Bug #4: P&L = variação ABSOLUTA do spread × quantidade
+                # A quantidade é limitada ao capital alocado / nocional do par.
+                # Usamos o spread médio como escala para converter em retorno %.
+                escala_nocional = max(
+                    abs(preco_y_entrada) + abs(preco_x_entrada),
+                    1.0  # piso para evitar divisão por zero
+                )
+                quantidade = capital_inicial / escala_nocional
+
+                if posicao_anterior == 1:  # Long spread
+                    lucro_trade = quantidade * (spread_atual - spread_entrada)
+                else:                      # Short spread
+                    lucro_trade = quantidade * (spread_entrada - spread_atual)
+
+
                 
                 saldo += lucro_trade
                 lucro_bruto_acumulado += lucro_trade

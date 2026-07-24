@@ -119,7 +119,11 @@ def calcular_parametros_dinamicos(spread: pd.Series, janela: int) -> pd.DataFram
     var_rw = var_rw.clip(lower=1e-6)
 
     parametros = pd.DataFrame({"rho": rho, "var_mr": var_mr, "var_rw": var_rw})
-    return parametros.bfill().ffill()
+    # CORREÇÃO Bug #1: Nunca usar bfill — ele puxa dados do futuro para trás.
+    # ffill() é causal (propaga o último valor conhecido).
+    # NaNs iniciais (antes do rolling ter dados) recebem defaults conservadores.
+    defaults = {"rho": 0.0, "var_mr": 1e-6, "var_rw": 1e-6}
+    return parametros.ffill().fillna(defaults)
 
 
 def filtro_kalman_cointegracao_parcial(spread: pd.Series, parametros: pd.DataFrame, var_medicao: float = 1e-4) -> pd.DataFrame:

@@ -51,29 +51,46 @@ def calcular_cwt_ricker(serie: np.ndarray, escalas: np.ndarray):
         matriz_cwt.append(coeficientes)
     return np.array(matriz_cwt)
 
-def preparar_dados(df: pd.DataFrame, seq_length: int = 24):
+def preparar_dados(df: pd.DataFrame, seq_length: int = 24,
+                   dt_fim_formacao: pd.Timestamp | None = None):
+    """Prepara tensores de entrada e labels para a SWANet.
+
+    CORREÇÃO Bug #3: Os labels olham 5 dias à frente. Para amostras cujos
+    5 dias seguintes ultrapassam o fim do período de formação, o label
+    recebe NaN (será excluído do treino), evitando vazamento de dados
+    do período de negociação para o treinamento.
+    """
     spread = df["mr_filtrado"].to_numpy()
     rw = df["rw_filtrado"].to_numpy()
+    datas_df = df["data"].to_numpy()
     n = len(spread)
-    
+
     escalas = np.arange(1, 17)
     X_wavelet, X_time, Y_labels, datas_alinhadas = [], [], [], []
-    
-    # Label: "O Random Walk engoliu o Mean Reverting nos próximos 5 dias?"
+
+    # Rótulo instantâneo: "O RW engoliu o MR neste dia?"
     rotulos = (np.abs(rw) > np.abs(spread) * 1.5).astype(np.float32)
 
     for i in range(seq_length, n - 5):
         janela = spread[i - seq_length:i]
-        
+
         cwt_2d = calcular_cwt_ricker(janela, escalas)
         X_wavelet.append(np.expand_dims(cwt_2d, axis=0))
         X_time.append(janela.reshape(-1, 1))
-        Y_labels.append(np.max(rotulos[i:i+5]))
-        datas_alinhadas.append(df["data"].iloc[i]) # Rastreia a data do tensor
-        
-    return (torch.tensor(np.array(X_wavelet), dtype=torch.float32), 
-            torch.tensor(np.array(X_time), dtype=torch.float32), 
-            torch.tensor(np.array(Y_labels), dtype=torch.float32),
+
+        # CORREÇÃO Bug #3: Se a janela de label [i, i+5) ultrapassa o fim
+        # da formação, marca como NaN para que a amostra seja excluída do
+        # treino (evita que labels do período de negociação treinem o modelo).
+        if dt_fim_formacao is not None and datas_df[i + 4] > dt_fim_formacao:
+            Y_labels.append(np.nan)
+        else:
+            Y_labels.append(np.max(rotulos[i:i+5]))
+
+        datas_alinhadas.append(datas_df[i])
+
+    return (torch.tensor(np.array(X_wavelet), dtype=torch.float32),
+            torch.tensor(np.array(X_time), dtype=torch.float32),
+            torch.tensor(np.array(Y_labels, dtype=np.float32)),
             np.array(datas_alinhadas))
 
 def main():
@@ -100,18 +117,27 @@ def main():
     
     print("Processando Transformada de Wavelet e LSTMs...")
     seq_length = 24
-    x_wav, x_time, y_labels, datas = preparar_dados(df, seq_length=seq_length)
-    
-    # --- ISOLAMENTO DO TREINAMENTO (IMPEDE LOOK-AHEAD BIAS) ---
     dt_inicio_formacao = pd.to_datetime(args.inicio_formacao).tz_localize("UTC")
     dt_fim_formacao = pd.to_datetime(args.fim_formacao).tz_localize("UTC")
-    mask_treino = (datas >= dt_inicio_formacao) & (datas <= dt_fim_formacao)
+
+    # CORREÇÃO Bug #3: Passa dt_fim_formacao para que labels que olham 5 dias
+    # além do fim da formação recebam NaN (serão excluídos do treino).
+    x_wav, x_time, y_labels, datas = preparar_dados(
+        df, seq_length=seq_length, dt_fim_formacao=dt_fim_formacao
+    )
+
+    # --- ISOLAMENTO DO TREINAMENTO (IMPEDE LOOK-AHEAD BIAS) ---
+    mask_treino = (
+        (datas >= dt_inicio_formacao)
+        & (datas <= dt_fim_formacao)
+        & ~np.isnan(y_labels.numpy())  # Exclui amostras com label vazado
+    )
     if mask_treino.sum() == 0:
         raise ValueError(
             "A SWANet ficou sem dados de treino. Verifique se o arquivo de entrada "
             "contem o mesmo periodo de formacao usado na cointegracao."
         )
-    
+
     x_wav_treino = x_wav[mask_treino]
     x_time_treino = x_time[mask_treino]
     y_labels_treino = y_labels[mask_treino]
@@ -140,7 +166,9 @@ def main():
     # Realinha as probabilidades de volta ao DataFrame original
     coluna_prob = np.full(len(df), np.nan)
     coluna_prob[seq_length : seq_length + len(probabilidades)] = probabilidades
-    df["prob_quebra"] = pd.Series(coluna_prob).ffill().bfill()
+    # CORREÇÃO Bug #5: Nunca bfill — pode propagar probabilidades futuras.
+    # Valor 0.5 (neutro) para posições sem previsão.
+    df["prob_quebra"] = pd.Series(coluna_prob, index=df.index).ffill().fillna(0.5)
 
     args.saida.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.saida, index=False)
