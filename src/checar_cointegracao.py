@@ -23,6 +23,8 @@ from statsmodels.tsa.stattools import adfuller
 
 # Altere estas datas para limitar o periodo usado no teste de cointegracao.
 # Use None para deixar uma das pontas sem limite.
+# A ideia (Gatev et al.) e usar um peíodo de formação de 12 meses e um periodo de negociacao de 6 meses. 
+# Apos os 6 meses, as posicoes sao fechadas, o modelo é descartado e os pares sao recalculados.
 DATA_INICIO_TESTE = "2024-01-01"
 DATA_FIM_TESTE = "2025-12-31"
 
