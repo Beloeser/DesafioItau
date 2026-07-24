@@ -10,6 +10,8 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
+from periodos import DATA_FIM_FORMACAO, DATA_INICIO_FORMACAO
+
 class SWANet(nn.Module):
     def __init__(self, seq_length=24):
         super(SWANet, self).__init__()
@@ -78,7 +80,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--entrada", type=Path, default=Path("data/processed/pipeline_cointegracao_parcial.csv"))
     parser.add_argument("--saida", type=Path, default=Path("data/processed/pipeline_com_quebras.csv"))
-    parser.add_argument("--corte-teste", type=str, default="2026-01-01", help="Data limite do Treinamento.")
+    parser.add_argument(
+        "--inicio-formacao",
+        type=str,
+        default=DATA_INICIO_FORMACAO,
+        help="Inicio do periodo usado para treinar a SWANet.",
+    )
+    parser.add_argument(
+        "--fim-formacao",
+        type=str,
+        default=DATA_FIM_FORMACAO,
+        help="Fim do periodo usado para treinar a SWANet.",
+    )
     args = parser.parse_args()
 
     print(f"Carregando {args.entrada}...")
@@ -90,15 +103,13 @@ def main():
     x_wav, x_time, y_labels, datas = preparar_dados(df, seq_length=seq_length)
     
     # --- ISOLAMENTO DO TREINAMENTO (IMPEDE LOOK-AHEAD BIAS) ---
-    dt_corte = pd.to_datetime(args.corte_teste).tz_localize('UTC')
-    mask_treino = datas < dt_corte
+    dt_inicio_formacao = pd.to_datetime(args.inicio_formacao).tz_localize("UTC")
+    dt_fim_formacao = pd.to_datetime(args.fim_formacao).tz_localize("UTC")
+    mask_treino = (datas >= dt_inicio_formacao) & (datas <= dt_fim_formacao)
     if mask_treino.sum() == 0:
-        ponto_corte = max(1, int(len(datas) * 0.7))
-        mask_treino = np.zeros(len(datas), dtype=bool)
-        mask_treino[:ponto_corte] = True
-        print(
-            "Aviso: o corte informado nao deixou dados para treino. "
-            f"Usando os primeiros {ponto_corte} exemplos para formacao."
+        raise ValueError(
+            "A SWANet ficou sem dados de treino. Verifique se o arquivo de entrada "
+            "contem o mesmo periodo de formacao usado na cointegracao."
         )
     
     x_wav_treino = x_wav[mask_treino]

@@ -11,6 +11,8 @@ import gymnasium as gym
 from gymnasium import spaces
 from stable_baselines3 import DQN
 
+from periodos import DATA_FIM_NEGOCIACAO, DATA_INICIO_NEGOCIACAO
+
 class TradingFronteirasMDP(gym.Env):
     def __init__(self, df: pd.DataFrame, taxa_corretagem: float = 0.0):
         super(TradingFronteirasMDP, self).__init__()
@@ -147,12 +149,17 @@ def executar_backtest_financeiro(modelo, env_teste, capital_inicial=10000.0):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--entrada", type=Path, default=Path("data/processed/pipeline_com_quebras.csv"))
-    parser.add_argument("--corte-teste", type=str, default="2026-01-01", help="Data onde o treino acaba e o teste cego começa.")
     parser.add_argument(
-        "--perc-treino",
-        type=float,
-        default=0.7,
-        help="Percentual usado para treino quando a data de corte nao divide a amostra.",
+        "--inicio-negociacao",
+        type=str,
+        default=DATA_INICIO_NEGOCIACAO,
+        help="Inicio do periodo exato de negociacao/backtest.",
+    )
+    parser.add_argument(
+        "--fim-negociacao",
+        type=str,
+        default=DATA_FIM_NEGOCIACAO,
+        help="Fim do periodo exato de negociacao/backtest.",
     )
     args = parser.parse_args()
 
@@ -160,24 +167,20 @@ def main():
     df = pd.read_csv(args.entrada).dropna()
     df["data"] = pd.to_datetime(df["data"], utc=True)
 
-    # 1. SPLIT DOS DADOS (Treino x Teste)
-    dt_corte = pd.to_datetime(args.corte_teste).tz_localize('UTC')
+    dt_inicio_negociacao = pd.to_datetime(args.inicio_negociacao).tz_localize("UTC")
+    dt_fim_negociacao = pd.to_datetime(args.fim_negociacao).tz_localize("UTC")
     
-    df_treino = df[df["data"] < dt_corte]
-    df_teste = df[df["data"] >= dt_corte]
-    
-    if df_treino.empty or df_teste.empty:
-        ponto_corte = int(len(df) * args.perc_treino)
-        df_treino = df.iloc[:ponto_corte].copy()
-        df_teste = df.iloc[ponto_corte:].copy()
-        print(
-            "Aviso: a data de corte nao separou treino/teste. "
-            f"Usando divisao percentual: {args.perc_treino:.0%} treino e "
-            f"{1 - args.perc_treino:.0%} teste."
-        )
+    df_treino = df[df["data"] < dt_inicio_negociacao]
+    df_teste = df[
+        (df["data"] >= dt_inicio_negociacao)
+        & (df["data"] <= dt_fim_negociacao)
+    ]
 
     if df_treino.empty or df_teste.empty:
-        raise ValueError("Erro ao dividir os dados. Verifique o percentual ou os dados de entrada.")
+        raise ValueError(
+            "Erro ao dividir os dados. O arquivo precisa conter dados antes do inicio "
+            "da negociacao para treino e dados dentro do periodo de negociacao para backtest."
+        )
 
     print(f"\nDados de TREINO (In-Sample): {len(df_treino)} dias")
     print(f"Dados de TESTE (Out-of-Sample): {len(df_teste)} dias")

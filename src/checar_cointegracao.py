@@ -20,13 +20,7 @@ import pandas as pd
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import adfuller
 
-
-# Altere estas datas para limitar o periodo usado no teste de cointegracao.
-# Use None para deixar uma das pontas sem limite.
-# A ideia (Gatev et al.) e usar um peíodo de formação de 12 meses e um periodo de negociacao de 6 meses. 
-# Apos os 6 meses, as posicoes sao fechadas, o modelo é descartado e os pares sao recalculados.
-DATA_INICIO_TESTE = "2024-01-01"
-DATA_FIM_TESTE = "2025-12-31"
+from periodos import DATA_FIM_FORMACAO, DATA_INICIO_FORMACAO
 
 
 def argumentos() -> argparse.Namespace:
@@ -195,14 +189,14 @@ def main() -> pd.DataFrame:
 
         print(
             f"[{indice}/{len(arquivos)}] Testando setor {arquivo.stem} "
-            f"de {DATA_INICIO_TESTE or 'inicio'} ate {DATA_FIM_TESTE or 'fim'}..."
+            f"de {DATA_INICIO_FORMACAO or 'inicio'} ate {DATA_FIM_FORMACAO or 'fim'}..."
         )
         tabela = testar_setor(
             arquivo,
             args.coluna_preco,
             args.min_observacoes,
-            DATA_INICIO_TESTE,
-            DATA_FIM_TESTE,
+            DATA_INICIO_FORMACAO,
+            DATA_FIM_FORMACAO,
         )
         print(f"  {len(tabela):,} regressao(oes) Engle-Granger avaliadas.")
         tabelas.append(tabela)

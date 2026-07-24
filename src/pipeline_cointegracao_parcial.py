@@ -11,6 +11,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from periodos import (
+    DATA_FIM_FORMACAO,
+    DATA_FIM_NEGOCIACAO,
+    DATA_INICIO_FORMACAO,
+    DATA_INICIO_NEGOCIACAO,
+)
+
 
 def argumentos() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Pipeline Integrado de Cointegracao Parcial e Kalman.")
@@ -23,8 +30,30 @@ def argumentos() -> argparse.Namespace:
     
     # --- Parâmetros de Backtest ---
     # Coloque aqui o período de NEGOCIAÇÃO (os 6 meses APÓS a sua avaliação)
-    parser.add_argument("--inicio-negociacao", type=str, default="2026-01-01", help="Ex: 2026-01-01")
-    parser.add_argument("--fim-negociacao", type=str, default="2026-06-30", help="Ex: 2026-06-30")
+    parser.add_argument(
+        "--inicio-formacao",
+        type=str,
+        default=DATA_INICIO_FORMACAO,
+        help="Inicio do periodo de formacao usado na cointegracao e SWANet.",
+    )
+    parser.add_argument(
+        "--fim-formacao",
+        type=str,
+        default=DATA_FIM_FORMACAO,
+        help="Fim do periodo de formacao usado na cointegracao e SWANet.",
+    )
+    parser.add_argument(
+        "--inicio-negociacao",
+        type=str,
+        default=DATA_INICIO_NEGOCIACAO,
+        help="Inicio do periodo de negociacao/backtest.",
+    )
+    parser.add_argument(
+        "--fim-negociacao",
+        type=str,
+        default=DATA_FIM_NEGOCIACAO,
+        help="Fim do periodo de negociacao/backtest.",
+    )
     
     parser.add_argument("--janela-parametros", type=int, default=120)
     parser.add_argument("--limiar-entrada", type=float, default=1.25)
@@ -48,7 +77,7 @@ def escolher_par(caminho: Path, setor: str | None, ativo_y: str | None, ativo_x:
 
 
 def carregar_spread(dados_setores: Path, setor: str, ativo_y: str, ativo_x: str, hedge_ratio: float, 
-                    inicio_trade: str, fim_trade: str, janela_dias: int) -> pd.DataFrame:
+                    inicio_serie: str, fim_serie: str, janela_dias: int) -> pd.DataFrame:
     """Extrai os precos já filtrados para a janela de tempo necessária."""
     caminho = dados_setores / f"{setor}.csv"
     
@@ -56,8 +85,8 @@ def carregar_spread(dados_setores: Path, setor: str, ativo_y: str, ativo_x: str,
     dados["data"] = pd.to_datetime(dados["data"], utc=True)
     
     # Converte as datas limites
-    dt_inicio = pd.to_datetime(inicio_trade).tz_localize('UTC')
-    dt_fim = pd.to_datetime(fim_trade).tz_localize('UTC')
+    dt_inicio = pd.to_datetime(inicio_serie).tz_localize('UTC')
+    dt_fim = pd.to_datetime(fim_serie).tz_localize('UTC')
     
     # Retrocede a data de início para garantir o "aquecimento" do filtro (dias corridos)
     dt_aquecimento = dt_inicio - pd.Timedelta(days=janela_dias * 2) 
@@ -148,12 +177,16 @@ def main():
     args = argumentos()
 
     par = escolher_par(args.cointegracao, args.setor, args.ativo_y, args.ativo_x)
-    print(f"Par selecionado: {par['Ativo Y']} x {par['Ativo X']} | Limites de Trade: {args.inicio_negociacao} a {args.fim_negociacao}")
+    print(
+        f"Par selecionado: {par['Ativo Y']} x {par['Ativo X']} | "
+        f"Formacao: {args.inicio_formacao} a {args.fim_formacao} | "
+        f"Negociacao: {args.inicio_negociacao} a {args.fim_negociacao}"
+    )
     
     # O carregamento agora inclui a lógica de aquecimento invisível
     df_dados = carregar_spread(
         args.dados_setores, str(par["Setor"]), str(par["Ativo Y"]), str(par["Ativo X"]), 
-        float(par["Hedge Ratio"]), args.inicio_negociacao, args.fim_negociacao, args.janela_parametros
+        float(par["Hedge Ratio"]), args.inicio_formacao, args.fim_negociacao, args.janela_parametros
     )
     
     spread = df_dados["spread_observado"]
@@ -167,13 +200,20 @@ def main():
     # =========================================================
     # RECORTE ESTRITO PARA SALVAMENTO (REMOVENDO O AQUECIMENTO)
     # =========================================================
-    dt_inicio_trade = pd.to_datetime(args.inicio_negociacao).tz_localize('UTC')
-    df_resultado = df_resultado[df_resultado["data"] >= dt_inicio_trade]
+    dt_inicio_formacao = pd.to_datetime(args.inicio_formacao).tz_localize('UTC')
+    dt_fim_negociacao = pd.to_datetime(args.fim_negociacao).tz_localize('UTC')
+    df_resultado = df_resultado[
+        (df_resultado["data"] >= dt_inicio_formacao)
+        & (df_resultado["data"] <= dt_fim_negociacao)
+    ]
     
     args.saida.parent.mkdir(parents=True, exist_ok=True)
     df_resultado.to_csv(args.saida, index=False)
     
-    print(f"\nSalvo com sucesso em: {args.saida} (Apenas os {len(df_resultado)} dias uteis do periodo de trade)")
+    print(
+        f"\nSalvo com sucesso em: {args.saida} "
+        f"({len(df_resultado)} dias uteis de formacao + negociacao)"
+    )
 
 if __name__ == "__main__":
     main()
