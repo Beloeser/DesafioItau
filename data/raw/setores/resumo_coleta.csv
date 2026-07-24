@@ -1,7 +1,7 @@
 setor,tickers_solicitados,tickers_baixados,linhas,tickers_sem_dados
-financeiro,37,37,91857,
-mineracao_siderurgia,16,16,49145,
-energia_eletrica,35,35,82720,
-oleo_gas,15,13,38038,"PTNT3,PTNT4"
-agro_alimentos,11,11,38224,
-industria,23,23,74238,
+financeiro,37,37,100900,
+mineracao_siderurgia,16,16,42869,
+energia_eletrica,35,35,96866,
+oleo_gas,15,13,30494,"PTNT3,PTNT4"
+agro_alimentos,11,11,24605,
+industria,23,23,63164,

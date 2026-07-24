@@ -53,15 +53,15 @@ def argumentos() -> argparse.Namespace:
     parser.add_argument(
         "--inicio",
         default=None,
-        help="Data inicial (AAAA-MM-DD). Em 1h, o Yahoo limita o historico a 730 dias.",
+        help="Data inicial (AAAA-MM-DD). Por padrao, usa 2015-01-01 para dados diarios.",
     )
     parser.add_argument(
         "--fim", default=None,
         help="Data final exclusiva (AAAA-MM-DD). Por padrao, usa a data atual."
     )
     parser.add_argument(
-        "--intervalo", default="1h", choices=["1h", "1d", "1wk", "1mo"],
-        help="Frequencia das observacoes (padrao: 1h)."
+        "--intervalo", default="1d", choices=["1h", "1d", "1wk", "1mo"],
+        help="Frequencia das observacoes (padrao: 1d)."
     )
     parser.add_argument(
         "--saida", type=Path, default=Path("data/raw/setores"),

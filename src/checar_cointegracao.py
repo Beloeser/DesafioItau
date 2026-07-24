@@ -21,6 +21,12 @@ import statsmodels.api as sm
 from statsmodels.tsa.stattools import adfuller
 
 
+# Altere estas datas para limitar o periodo usado no teste de cointegracao.
+# Use None para deixar uma das pontas sem limite.
+DATA_INICIO_TESTE = "2024-01-01"
+DATA_FIM_TESTE = "2025-12-31"
+
+
 def argumentos() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -84,10 +90,23 @@ def arquivos_setores(diretorio: Path, setores: list[str] | None) -> list[Path]:
     )
 
 
-def carregar_precos(caminho: Path, coluna_preco: str) -> pd.DataFrame:
+def carregar_precos(
+    caminho: Path,
+    coluna_preco: str,
+    data_inicio: str | None,
+    data_fim: str | None,
+) -> pd.DataFrame:
     dados = pd.read_csv(caminho, usecols=["data", "ticker", coluna_preco])
     dados["data"] = pd.to_datetime(dados["data"], utc=True)
     dados[coluna_preco] = pd.to_numeric(dados[coluna_preco], errors="coerce")
+
+    if data_inicio is not None:
+        inicio = pd.Timestamp(data_inicio, tz="UTC")
+        dados = dados[dados["data"] >= inicio]
+
+    if data_fim is not None:
+        fim = pd.Timestamp(data_fim, tz="UTC")
+        dados = dados[dados["data"] <= fim]
 
     precos = dados.pivot_table(
         index="data",
@@ -133,9 +152,11 @@ def testar_setor(
     caminho: Path,
     coluna_preco: str,
     min_observacoes: int,
+    data_inicio: str | None,
+    data_fim: str | None,
 ) -> pd.DataFrame:
     setor = caminho.stem
-    precos = carregar_precos(caminho, coluna_preco)
+    precos = carregar_precos(caminho, coluna_preco, data_inicio, data_fim)
     tickers = list(precos.columns)
     resultados = []
 
@@ -170,8 +191,17 @@ def main() -> pd.DataFrame:
             print(f"[{indice}/{len(arquivos)}] Pulando arquivo ausente: {arquivo}")
             continue
 
-        print(f"[{indice}/{len(arquivos)}] Testando setor {arquivo.stem}...")
-        tabela = testar_setor(arquivo, args.coluna_preco, args.min_observacoes)
+        print(
+            f"[{indice}/{len(arquivos)}] Testando setor {arquivo.stem} "
+            f"de {DATA_INICIO_TESTE or 'inicio'} ate {DATA_FIM_TESTE or 'fim'}..."
+        )
+        tabela = testar_setor(
+            arquivo,
+            args.coluna_preco,
+            args.min_observacoes,
+            DATA_INICIO_TESTE,
+            DATA_FIM_TESTE,
+        )
         print(f"  {len(tabela):,} regressao(oes) Engle-Granger avaliadas.")
         tabelas.append(tabela)
 
