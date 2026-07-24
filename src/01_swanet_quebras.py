@@ -3,14 +3,12 @@ Módulo 1 (Corrigido): SWANet - Predição de Quebra Estrutural
 Garante que o treinamento ocorra estritamente no período de formação (ex: 24-25)
 e gera as probabilidades para o período de negociação (ex: 2026).
 """
-1
 import argparse
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from scipy import signal
 
 class SWANet(nn.Module):
     def __init__(self, seq_length=24):
@@ -33,8 +31,23 @@ class SWANet(nn.Module):
         out_fused = torch.cat((out_cnn, out_lstm), dim=1)
         return self.fc(out_fused)
 
+def ricker_wavelet(pontos: int, escala: float) -> np.ndarray:
+    """Gera a wavelet Ricker, equivalente ao antigo scipy.signal.ricker."""
+    centro = (pontos - 1) / 2
+    x = np.arange(pontos) - centro
+    a2 = escala ** 2
+    normalizacao = 2 / (np.sqrt(3 * escala) * np.pi ** 0.25)
+    return normalizacao * (1 - x ** 2 / a2) * np.exp(-(x ** 2) / (2 * a2))
+
+
 def calcular_cwt_ricker(serie: np.ndarray, escalas: np.ndarray):
-    return signal.cwt(serie, signal.ricker, escalas)
+    matriz_cwt = []
+    for escala in escalas:
+        pontos = min(int(10 * escala), len(serie))
+        wavelet = ricker_wavelet(pontos, escala)
+        coeficientes = np.convolve(serie, wavelet[::-1], mode="same")
+        matriz_cwt.append(coeficientes)
+    return np.array(matriz_cwt)
 
 def preparar_dados(df: pd.DataFrame, seq_length: int = 24):
     spread = df["mr_filtrado"].to_numpy()
@@ -79,6 +92,14 @@ def main():
     # --- ISOLAMENTO DO TREINAMENTO (IMPEDE LOOK-AHEAD BIAS) ---
     dt_corte = pd.to_datetime(args.corte_teste).tz_localize('UTC')
     mask_treino = datas < dt_corte
+    if mask_treino.sum() == 0:
+        ponto_corte = max(1, int(len(datas) * 0.7))
+        mask_treino = np.zeros(len(datas), dtype=bool)
+        mask_treino[:ponto_corte] = True
+        print(
+            "Aviso: o corte informado nao deixou dados para treino. "
+            f"Usando os primeiros {ponto_corte} exemplos para formacao."
+        )
     
     x_wav_treino = x_wav[mask_treino]
     x_time_treino = x_time[mask_treino]

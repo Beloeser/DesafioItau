@@ -12,10 +12,9 @@ from gymnasium import spaces
 from stable_baselines3 import DQN
 
 class TradingFronteirasMDP(gym.Env):
-    def __init__(self, df: pd.DataFrame, taxa_corretagem: float = 0.002):
+    def __init__(self, df: pd.DataFrame, taxa_corretagem: float = 0.0):
         super(TradingFronteirasMDP, self).__init__()
         self.df = df.reset_index(drop=True)
-        # O artigo usa 0.2% de custo por perna da operacao (0.002)
         self.taxa_corretagem = taxa_corretagem 
         
         # Acoes: grid de fronteiras (Entrada, StopLoss)
@@ -93,7 +92,7 @@ class TradingFronteirasMDP(gym.Env):
             
         return self._get_obs(), float(recompensa), done, False, {}
 
-def executar_backtest_financeiro(modelo, env_teste, capital_inicial=10000.0, taxa_corretagem=0.002):
+def executar_backtest_financeiro(modelo, env_teste, capital_inicial=10000.0):
     """Simula as operacoes no mundo real utilizando as decisoes da IA."""
     obs, _ = env_teste.reset()
     terminou = False
@@ -115,8 +114,6 @@ def executar_backtest_financeiro(modelo, env_teste, capital_inicial=10000.0, tax
             # IA Mandou Abrir Posicao
             if env_teste.posicao in [1, -1] and posicao_anterior == 0:
                 preco_entrada = preco_real_spread
-                custo_entrada = capital_inicial * taxa_corretagem # Desconta 0.2% do capital operado
-                saldo -= custo_entrada 
                 
             # IA Mandou Fechar Posicao
             elif env_teste.posicao == 0 and posicao_anterior != 0:
@@ -126,9 +123,8 @@ def executar_backtest_financeiro(modelo, env_teste, capital_inicial=10000.0, tax
                     variacao = (preco_entrada - preco_real_spread) / abs(preco_entrada) if preco_entrada != 0 else 0
                 
                 lucro_trade = capital_inicial * variacao
-                custo_saida = capital_inicial * taxa_corretagem
                 
-                saldo += lucro_trade - custo_saida
+                saldo += lucro_trade
                 lucro_bruto_acumulado += lucro_trade
                 trades_realizados += 1
                 
@@ -143,8 +139,8 @@ def executar_backtest_financeiro(modelo, env_teste, capital_inicial=10000.0, tax
     print(f"Capital Alocado:       R$ {capital_inicial:.2f}")
     print(f"Saldo Final:           R$ {saldo:.2f}")
     print(f"Total de Trades:       {trades_realizados}")
-    print(f"Custos de Transação:   0.4% por trade completo")
-    print(f"Rentabilidade Líquida: {rentabilidade_pct:.2f}%")
+    print(f"Custos de Transação:   desconsiderados")
+    print(f"Rentabilidade:         {rentabilidade_pct:.2f}%")
     print("="*50)
 
 
@@ -152,6 +148,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--entrada", type=Path, default=Path("data/processed/pipeline_com_quebras.csv"))
     parser.add_argument("--corte-teste", type=str, default="2026-01-01", help="Data onde o treino acaba e o teste cego começa.")
+    parser.add_argument(
+        "--perc-treino",
+        type=float,
+        default=0.7,
+        help="Percentual usado para treino quando a data de corte nao divide a amostra.",
+    )
     args = parser.parse_args()
 
     print(f"Carregando {args.entrada}...")
@@ -165,7 +167,17 @@ def main():
     df_teste = df[df["data"] >= dt_corte]
     
     if df_treino.empty or df_teste.empty:
-        raise ValueError("Erro ao dividir os dados. Verifique a data de corte ou os dados de entrada.")
+        ponto_corte = int(len(df) * args.perc_treino)
+        df_treino = df.iloc[:ponto_corte].copy()
+        df_teste = df.iloc[ponto_corte:].copy()
+        print(
+            "Aviso: a data de corte nao separou treino/teste. "
+            f"Usando divisao percentual: {args.perc_treino:.0%} treino e "
+            f"{1 - args.perc_treino:.0%} teste."
+        )
+
+    if df_treino.empty or df_teste.empty:
+        raise ValueError("Erro ao dividir os dados. Verifique o percentual ou os dados de entrada.")
 
     print(f"\nDados de TREINO (In-Sample): {len(df_treino)} dias")
     print(f"Dados de TESTE (Out-of-Sample): {len(df_teste)} dias")
