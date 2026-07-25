@@ -9,8 +9,15 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 
 from periodos import DATA_FIM_FORMACAO, DATA_INICIO_FORMACAO
+
+SEMENTE = 42
+EPOCAS_PADRAO = 50
+BATCH_SIZE_PADRAO = 64
+PACIENCIA_PADRAO = 8
+FRACAO_VALIDACAO = 0.2
 
 class SWANet(nn.Module):
     def __init__(self, seq_length=24):
@@ -23,7 +30,7 @@ class SWANet(nn.Module):
         self.lstm = nn.LSTM(input_size=1, hidden_size=16, batch_first=True)
         self.fc = nn.Sequential(
             nn.Linear(384 + 16, 64), nn.ReLU(), nn.Dropout(0.3),
-            nn.Linear(64, 1), nn.Sigmoid() 
+            nn.Linear(64, 1)
         )
 
     def forward(self, x_wavelet, x_time):
@@ -93,6 +100,115 @@ def preparar_dados(df: pd.DataFrame, seq_length: int = 24,
             torch.tensor(np.array(Y_labels, dtype=np.float32)),
             np.array(datas_alinhadas))
 
+
+def dividir_treino_validacao(
+    x_wav: torch.Tensor,
+    x_time: torch.Tensor,
+    y_labels: torch.Tensor,
+) -> tuple[tuple[torch.Tensor, torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None]:
+    num_amostras = len(y_labels)
+    num_validacao = int(num_amostras * FRACAO_VALIDACAO)
+
+    if num_validacao < 10 or (num_amostras - num_validacao) < 10:
+        return (x_wav, x_time, y_labels), None
+
+    corte = num_amostras - num_validacao
+    treino = (x_wav[:corte], x_time[:corte], y_labels[:corte])
+    validacao = (x_wav[corte:], x_time[corte:], y_labels[corte:])
+    return treino, validacao
+
+
+def calcular_pos_weight(y_labels: torch.Tensor) -> torch.Tensor:
+    positivos = float(y_labels.sum().item())
+    negativos = float(len(y_labels) - positivos)
+    if positivos <= 0 or negativos <= 0:
+        return torch.tensor([1.0], dtype=torch.float32)
+    return torch.tensor([negativos / positivos], dtype=torch.float32)
+
+
+def avaliar_loss(
+    modelo: SWANet,
+    criterio: nn.Module,
+    x_wav: torch.Tensor,
+    x_time: torch.Tensor,
+    y_labels: torch.Tensor,
+) -> float:
+    modelo.eval()
+    with torch.no_grad():
+        logits = modelo(x_wav, x_time).view(-1)
+        perda = criterio(logits, y_labels)
+    return float(perda.item())
+
+
+def treinar_swanet(
+    modelo: SWANet,
+    x_wav: torch.Tensor,
+    x_time: torch.Tensor,
+    y_labels: torch.Tensor,
+    epocas: int,
+    batch_size: int,
+    paciencia: int,
+) -> None:
+    (x_wav_treino, x_time_treino, y_treino), validacao = dividir_treino_validacao(
+        x_wav, x_time, y_labels
+    )
+    criterio = nn.BCEWithLogitsLoss(pos_weight=calcular_pos_weight(y_treino))
+    otimizador = torch.optim.Adam(modelo.parameters(), lr=0.001, weight_decay=1e-4)
+
+    dataset = TensorDataset(x_wav_treino, x_time_treino, y_treino)
+    gerador = torch.Generator().manual_seed(SEMENTE)
+    loader = DataLoader(
+        dataset,
+        batch_size=min(batch_size, len(dataset)),
+        shuffle=True,
+        generator=gerador,
+    )
+
+    melhor_estado = None
+    melhor_loss = float("inf")
+    epocas_sem_melhora = 0
+
+    for epoca in range(1, epocas + 1):
+        modelo.train()
+        perdas_batch = []
+
+        for lote_wav, lote_time, lote_y in loader:
+            otimizador.zero_grad()
+            logits = modelo(lote_wav, lote_time).view(-1)
+            perda = criterio(logits, lote_y)
+            perda.backward()
+            torch.nn.utils.clip_grad_norm_(modelo.parameters(), max_norm=1.0)
+            otimizador.step()
+            perdas_batch.append(float(perda.item()))
+
+        loss_treino = float(np.mean(perdas_batch))
+        if validacao is None:
+            loss_monitorado = loss_treino
+            sufixo = ""
+        else:
+            loss_validacao = avaliar_loss(modelo, criterio, *validacao)
+            loss_monitorado = loss_validacao
+            sufixo = f" | Val: {loss_validacao:.4f}"
+
+        print(f"Época {epoca}/{epocas} | Treino: {loss_treino:.4f}{sufixo}")
+
+        if loss_monitorado < melhor_loss - 1e-4:
+            melhor_loss = loss_monitorado
+            melhor_estado = {
+                chave: valor.detach().clone()
+                for chave, valor in modelo.state_dict().items()
+            }
+            epocas_sem_melhora = 0
+        else:
+            epocas_sem_melhora += 1
+            if epocas_sem_melhora >= paciencia:
+                print(f"Parada antecipada: sem melhora por {paciencia} épocas.")
+                break
+
+    if melhor_estado is not None:
+        modelo.load_state_dict(melhor_estado)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--entrada", type=Path, default=Path("data/processed/pipeline_cointegracao_parcial.csv"))
@@ -109,7 +225,13 @@ def main():
         default=DATA_FIM_FORMACAO,
         help="Fim do periodo usado para treinar a SWANet.",
     )
+    parser.add_argument("--epocas", type=int, default=EPOCAS_PADRAO)
+    parser.add_argument("--batch-size", type=int, default=BATCH_SIZE_PADRAO)
+    parser.add_argument("--paciencia", type=int, default=PACIENCIA_PADRAO)
     args = parser.parse_args()
+
+    torch.manual_seed(SEMENTE)
+    np.random.seed(SEMENTE)
 
     print(f"Carregando {args.entrada}...")
     df = pd.read_csv(args.entrada).dropna(subset=["mr_filtrado"])
@@ -141,27 +263,51 @@ def main():
     x_wav_treino = x_wav[mask_treino]
     x_time_treino = x_time[mask_treino]
     y_labels_treino = y_labels[mask_treino]
+    positivos = int(y_labels_treino.sum().item())
+    total_treino = len(y_labels_treino)
+    taxa_positiva = positivos / total_treino
+
+    print(
+        f"Rotulos treino: {positivos}/{total_treino} positivos "
+        f"({taxa_positiva:.2%})."
+    )
+
+    if positivos == 0 or positivos == total_treino:
+        print(
+            "A SWANet recebeu apenas uma classe no treino; "
+            "pulando treino neural e usando a taxa-base constante."
+        )
+        df["prob_quebra"] = taxa_positiva
+        args.saida.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(args.saida, index=False)
+        print(f"Pipeline de predicao concluida e salva em: {args.saida}")
+        return
     
-    print(f"Treinando SWANet apenas com dados passados ({len(x_wav_treino)} dias de formacao)...")
+    print(
+        "Treinando SWANet apenas com dados passados "
+        f"({len(x_wav_treino)} dias de formacao)..."
+    )
+    print(
+        f"Config treino: epocas={args.epocas}, batch_size={args.batch_size}, "
+        f"shuffle=True, paciencia={args.paciencia}"
+    )
     modelo = SWANet(seq_length=seq_length)
-    criterio = nn.BCELoss() 
-    otimizador = torch.optim.Adam(modelo.parameters(), lr=0.001)
-    
-    modelo.train()
-    for epoca in range(5): 
-        otimizador.zero_grad()
-        saidas = modelo(x_wav_treino, x_time_treino).squeeze()
-        perda = criterio(saidas, y_labels_treino)
-        perda.backward()
-        otimizador.step()
-        print(f"Época {epoca+1}/5 | Perda (Loss): {perda.item():.4f}")
+    treinar_swanet(
+        modelo,
+        x_wav_treino,
+        x_time_treino,
+        y_labels_treino,
+        epocas=args.epocas,
+        batch_size=args.batch_size,
+        paciencia=args.paciencia,
+    )
 
     # --- PREVISÃO (OUT-OF-SAMPLE) ---
     print("Treinamento finalizado. Gerando previsoes para o periodo de teste...")
     modelo.eval()
     with torch.no_grad():
         # Prevemos para o vetor todo, pois o CSV final precisa de todas as datas
-        probabilidades = modelo(x_wav, x_time).squeeze().numpy()
+        probabilidades = torch.sigmoid(modelo(x_wav, x_time).view(-1)).numpy()
     
     # Realinha as probabilidades de volta ao DataFrame original
     coluna_prob = np.full(len(df), np.nan)
