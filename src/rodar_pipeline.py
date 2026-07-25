@@ -13,6 +13,7 @@ ETAPAS = [
     ("Checagem de cointegracao", "checar_cointegracao.py"),
     ("Cointegracao parcial e Kalman", "pipeline_cointegracao_parcial.py"),
     ("SWANet de quebras", "01_swanet_quebras.py"),
+    ("Rentabilidade CDI", "calcular_rentabilidade_cdi.py"),
     ("Backtest DQN", "02_rl_dqn_trading.py"),
 ]
 

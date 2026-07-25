@@ -13,6 +13,8 @@ from stable_baselines3 import DQN
 
 from periodos import DATA_FIM_NEGOCIACAO, DATA_INICIO_NEGOCIACAO
 
+CAMINHO_CDI_PADRAO = Path("data/raw/cdi/rentabilidade_cdi.csv")
+
 class TradingFronteirasMDP(gym.Env):
     def __init__(self, df: pd.DataFrame, taxa_corretagem: float = 0.0):
         super(TradingFronteirasMDP, self).__init__()
@@ -106,7 +108,37 @@ class TradingFronteirasMDP(gym.Env):
             
         return self._get_obs(), float(recompensa), done, False, {}
 
-def executar_backtest_financeiro(modelo, env_teste, capital_inicial=10000.0):
+def calcular_cdi_periodo(caminho_cdi: Path, inicio, fim) -> float | None:
+    """Retorna a rentabilidade acumulada do CDI no periodo do backtest."""
+    if not caminho_cdi.exists():
+        print(f"Aviso: arquivo de CDI nao encontrado em {caminho_cdi}.")
+        return None
+
+    cdi = pd.read_csv(caminho_cdi)
+    colunas_necessarias = {"data", "fator_cdi_dia"}
+    if not colunas_necessarias.issubset(cdi.columns):
+        print(
+            "Aviso: arquivo de CDI sem as colunas esperadas "
+            "('data' e 'fator_cdi_dia')."
+        )
+        return None
+
+    cdi["data"] = pd.to_datetime(cdi["data"], utc=True)
+    cdi_periodo = cdi[(cdi["data"] >= inicio) & (cdi["data"] <= fim)]
+    if cdi_periodo.empty:
+        print("Aviso: nao ha dados de CDI dentro do periodo avaliado.")
+        return None
+
+    fator_acumulado = cdi_periodo["fator_cdi_dia"].prod()
+    return (fator_acumulado - 1) * 100
+
+
+def executar_backtest_financeiro(
+    modelo,
+    env_teste,
+    capital_inicial=10000.0,
+    caminho_cdi: Path | None = CAMINHO_CDI_PADRAO,
+):
     """Simula operações de pairs trading com P&L financeiro realista.
 
     CORREÇÃO Bug #4: O P&L de um pairs trade é calculado como:
@@ -171,16 +203,32 @@ def executar_backtest_financeiro(modelo, env_teste, capital_inicial=10000.0):
         posicao_anterior = env_teste.posicao
 
     rentabilidade_pct = ((saldo - capital_inicial) / capital_inicial) * 100
+    data_inicio = env_teste.df["data"].iloc[0]
+    data_fim = env_teste.df["data"].iloc[-1]
+    rentabilidade_cdi_pct = (
+        calcular_cdi_periodo(caminho_cdi, data_inicio, data_fim)
+        if caminho_cdi is not None
+        else None
+    )
     
     print("\n" + "="*50)
     print("RELATÓRIO FINANCEIRO: OUT-OF-SAMPLE (Teste)")
     print("="*50)
-    print(f"Período Avaliado:      {env_teste.df['data'].iloc[0]} a {env_teste.df['data'].iloc[-1]}")
+    print(f"Período Avaliado:      {data_inicio} a {data_fim}")
     print(f"Capital Alocado:       R$ {capital_inicial:.2f}")
     print(f"Saldo Final:           R$ {saldo:.2f}")
     print(f"Total de Trades:       {trades_realizados}")
     print(f"Custos de Transação:   desconsiderados")
     print(f"Rentabilidade:         {rentabilidade_pct:.2f}%")
+    if rentabilidade_cdi_pct is not None:
+        diferenca_cdi_pct = rentabilidade_pct - rentabilidade_cdi_pct
+        print(f"Rentabilidade CDI:     {rentabilidade_cdi_pct:.2f}%")
+        print(f"Diferença vs CDI:      {diferenca_cdi_pct:.2f} p.p.")
+        if rentabilidade_cdi_pct != 0:
+            percentual_cdi = (rentabilidade_pct / rentabilidade_cdi_pct) * 100
+            print(f"Percentual do CDI:     {percentual_cdi:.2f}%")
+        else:
+            print("Percentual do CDI:     indisponivel (CDI igual a 0%)")
     print("="*50)
 
 
@@ -198,6 +246,12 @@ def main():
         type=str,
         default=DATA_FIM_NEGOCIACAO,
         help="Fim do periodo exato de negociacao/backtest.",
+    )
+    parser.add_argument(
+        "--cdi",
+        type=Path,
+        default=CAMINHO_CDI_PADRAO,
+        help=f"CSV com a rentabilidade diaria do CDI. Padrao: {CAMINHO_CDI_PADRAO}.",
     )
     args = parser.parse_args()
 
@@ -232,7 +286,7 @@ def main():
     # 3. VALIDAÇÃO OUT-OF-SAMPLE
     print("Treinamento concluído. Iniciando backtest cego nos 6 meses seguintes...")
     env_teste = TradingFronteirasMDP(df=df_teste)
-    executar_backtest_financeiro(modelo_dqn, env_teste)
+    executar_backtest_financeiro(modelo_dqn, env_teste, caminho_cdi=args.cdi)
 
 if __name__ == "__main__":
     main()

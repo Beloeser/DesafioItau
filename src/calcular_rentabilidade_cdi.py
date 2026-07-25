@@ -1,7 +1,6 @@
-"""Calcula a rentabilidade acumulada do CDI em um periodo definido no arquivo.
+"""Calcula a rentabilidade acumulada do CDI em um periodo informado.
 
 Fonte: Banco Central do Brasil, SGS serie 12 (CDI diario, % a.d.).
-Edite DATA_INICIO e DATA_FIM abaixo para alterar o periodo padrao.
 """
 
 from __future__ import annotations
@@ -16,9 +15,10 @@ from urllib.request import urlopen
 
 import pandas as pd
 
+from periodos import DATA_FIM_NEGOCIACAO, DATA_INICIO_NEGOCIACAO
 
-DATA_INICIO = "2024-01-01"
-DATA_FIM = "2024-12-31"
+DATA_INICIO = DATA_INICIO_NEGOCIACAO
+DATA_FIM = DATA_FIM_NEGOCIACAO
 SAIDA = Path("data/raw/cdi/rentabilidade_cdi.csv")
 
 SERIE_CDI_SGS = 12
