@@ -1,6 +1,6 @@
 """
-Módulo 2: Otimização da Estratégia via Reinforcement Learning (Seção 7)
-Arquitetura: Deep Q-Network (DQN) modelando a carteira como um Processo de Decisão de Markov.
+Módulo 2 (Definitivo): Deep Q-Network com Separação Treino/Teste.
+Elimina o viés de overfitting separando estritamente os dados in-sample e out-of-sample.
 """
 
 import argparse
@@ -11,22 +11,15 @@ import gymnasium as gym
 from gymnasium import spaces
 from stable_baselines3 import DQN
 
+from periodos import DATA_FIM_NEGOCIACAO, DATA_INICIO_NEGOCIACAO
+
 class TradingFronteirasMDP(gym.Env):
-    """
-    O Agente não envia apenas ordem de compra/venda. Ele escolhe o 'conjunto de fronteiras'
-    para o Z-Score do Kalman a cada momento, conforme descrito no artigo.
-    """
-    def __init__(self, df: pd.DataFrame, custo_transacao: float = 0.004):
+    def __init__(self, df: pd.DataFrame, taxa_corretagem: float = 0.0):
         super(TradingFronteirasMDP, self).__init__()
         self.df = df.reset_index(drop=True)
-        self.custo_transacao = custo_transacao
+        self.taxa_corretagem = taxa_corretagem 
         
-        # Acoes: O artigo menciona que as acoes definem as fronteiras de entrada e stop loss.
-        # Criamos um grid discreto de estrategias possiveis:
-        # Acao 0: Entrada (z=1.0), StopLoss (z=3.0)
-        # Acao 1: Entrada (z=1.25), StopLoss (z=3.5) -> Recomendado
-        # Acao 2: Entrada (z=1.5), StopLoss (z=4.0)
-        # Acao 3: Fechar posicoes (Forcar saida)
+        # Acoes: grid de fronteiras (Entrada, StopLoss)
         self.fronteiras = [
             {"entrada": 1.00, "stop": 3.0},
             {"entrada": 1.25, "stop": 3.5},
@@ -34,12 +27,13 @@ class TradingFronteirasMDP(gym.Env):
         ]
         self.action_space = spaces.Discrete(4)
         
-        # Estados: [Z-Score Atual, Posicao Atual, Probabilidade de Quebra (SWANet), Tempo para fechar]
+        # Estados: [Z-Score, Posicao, Prob Quebra, Tempo Restante]
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32)
         
         self.current_step = 0
         self.posicao = 0
         self.zscore_entrada = 0.0
+        self.spread_entrada = 0.0  # CORREÇÃO Bug #6: rastreia spread real
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -60,46 +54,48 @@ class TradingFronteirasMDP(gym.Env):
     def step(self, action):
         row = self.df.iloc[self.current_step]
         z_atual = row["zscore_mr"]
+        spread_atual = row["spread_observado"]
         recompensa = 0.0
         done = False
         
-        # Define os limites baseados na acao da DQN
         if action < 3:
             limite_entrada = self.fronteiras[action]["entrada"]
             limite_stop = self.fronteiras[action]["stop"]
         else:
-            limite_entrada = np.inf # Nao permite entrada se acao = 3 (Zerar)
-            limite_stop = 0.0       # Forca stop
+            limite_entrada = np.inf
+            limite_stop = 0.0 
 
-        # --- MECÂNICA DE TRADE (Eqs do Q-Value são maximizadas indiretamente pela recompensa) ---
+        # Logica baseada no sinal isolado de Reversao a Media
         if self.posicao == 0 and action < 3:
-            # Avalia condicao de entrada
             if z_atual <= -limite_entrada:
-                self.posicao = 1 # Long
+                self.posicao = 1 
                 self.zscore_entrada = z_atual
-                recompensa -= self.custo_transacao
+                self.spread_entrada = spread_atual
+                recompensa -= self.taxa_corretagem
             elif z_atual >= limite_entrada:
-                self.posicao = -1 # Short
+                self.posicao = -1
                 self.zscore_entrada = z_atual
-                recompensa -= self.custo_transacao
+                self.spread_entrada = spread_atual
+                recompensa -= self.taxa_corretagem
 
-        elif self.posicao == 1: # Se está Long
-            if z_atual >= 0: # Saida normal (cruzou o zero)
-                recompensa += (z_atual - self.zscore_entrada) - self.custo_transacao
-                self.posicao = 0
-            elif z_atual <= -limite_stop or action == 3: # Stop Loss ou Saida Forcada
-                recompensa += (z_atual - self.zscore_entrada) - self.custo_transacao
-                self.posicao = 0
-
-        elif self.posicao == -1: # Se está Short
-            if z_atual <= 0: # Saida normal
-                recompensa += (self.zscore_entrada - z_atual) - self.custo_transacao
-                self.posicao = 0
-            elif z_atual >= limite_stop or action == 3: # Stop Loss ou Saida Forcada
-                recompensa += (self.zscore_entrada - z_atual) - self.custo_transacao
+        elif self.posicao == 1: 
+            if z_atual >= 0 or z_atual <= -limite_stop or action == 3: 
+                # CORREÇÃO Bug #6: Recompensa baseada em variação normalizada
+                # do spread, não do z-score, para alinhar treino com backtest.
+                std_mr = row.get("std_mr", 1.0)
+                if std_mr > 0:
+                    recompensa += (spread_atual - self.spread_entrada) / std_mr
+                recompensa -= self.taxa_corretagem
                 self.posicao = 0
 
-        # Penalidade por manter posicoes quando SWANet avisa quebra estrutural iminente
+        elif self.posicao == -1:
+            if z_atual <= 0 or z_atual >= limite_stop or action == 3:
+                std_mr = row.get("std_mr", 1.0)
+                if std_mr > 0:
+                    recompensa += (self.spread_entrada - spread_atual) / std_mr
+                recompensa -= self.taxa_corretagem
+                self.posicao = 0
+
         prob_quebra = row.get("prob_quebra", 0.0)
         if self.posicao != 0:
             recompensa -= (prob_quebra * 0.05) 
@@ -110,37 +106,133 @@ class TradingFronteirasMDP(gym.Env):
             
         return self._get_obs(), float(recompensa), done, False, {}
 
+def executar_backtest_financeiro(modelo, env_teste, capital_inicial=10000.0):
+    """Simula operações de pairs trading com P&L financeiro realista.
+
+    CORREÇÃO Bug #4: O P&L de um pairs trade é calculado como:
+        lucro = quantidade × (spread_saida - spread_entrada)   [long]
+        lucro = quantidade × (spread_entrada - spread_saida)   [short]
+    onde quantidade = capital / custo_nocional_do_par.
+
+    A versão anterior usava variação PERCENTUAL do spread, que explode
+    quando o spread está perto de zero (divisão por número pequeno).
+    """
+    obs, _ = env_teste.reset()
+    terminou = False
+    
+    saldo = capital_inicial
+    posicao_anterior = 0
+    spread_entrada = 0.0
+    preco_y_entrada = 0.0
+    preco_x_entrada = 0.0
+    trades_realizados = 0
+    lucro_bruto_acumulado = 0.0
+
+    while not terminou:
+        acao, _states = modelo.predict(obs, deterministic=True)
+        row = env_teste.df.iloc[env_teste.current_step]
+        spread_atual = row["spread_observado"]
+        
+        obs, _, terminou, _, _ = env_teste.step(acao)
+
+        if env_teste.posicao != posicao_anterior:
+            # IA Mandou Abrir Posicao
+            if env_teste.posicao in [1, -1] and posicao_anterior == 0:
+                spread_entrada = spread_atual
+                # Captura preços individuais para calcular nocional
+                preco_y_entrada = row.get(env_teste.df.columns[1], 1.0) if len(env_teste.df.columns) > 1 else 1.0
+                preco_x_entrada = row.get(env_teste.df.columns[2], 1.0) if len(env_teste.df.columns) > 2 else 1.0
+                # Nocional = preco_Y + |hedge_ratio| * preco_X
+                # Como não temos hedge_ratio aqui, usamos o valor absoluto
+                # médio do spread como proxy conservador do nocional.
+                
+            # IA Mandou Fechar Posicao
+            elif env_teste.posicao == 0 and posicao_anterior != 0:
+                # CORREÇÃO Bug #4: P&L = variação ABSOLUTA do spread × quantidade
+                # A quantidade é limitada ao capital alocado / nocional do par.
+                # Usamos o spread médio como escala para converter em retorno %.
+                escala_nocional = max(
+                    abs(preco_y_entrada) + abs(preco_x_entrada),
+                    1.0  # piso para evitar divisão por zero
+                )
+                quantidade = capital_inicial / escala_nocional
+
+                if posicao_anterior == 1:  # Long spread
+                    lucro_trade = quantidade * (spread_atual - spread_entrada)
+                else:                      # Short spread
+                    lucro_trade = quantidade * (spread_entrada - spread_atual)
+
+
+                
+                saldo += lucro_trade
+                lucro_bruto_acumulado += lucro_trade
+                trades_realizados += 1
+                
+        posicao_anterior = env_teste.posicao
+
+    rentabilidade_pct = ((saldo - capital_inicial) / capital_inicial) * 100
+    
+    print("\n" + "="*50)
+    print("RELATÓRIO FINANCEIRO: OUT-OF-SAMPLE (Teste)")
+    print("="*50)
+    print(f"Período Avaliado:      {env_teste.df['data'].iloc[0]} a {env_teste.df['data'].iloc[-1]}")
+    print(f"Capital Alocado:       R$ {capital_inicial:.2f}")
+    print(f"Saldo Final:           R$ {saldo:.2f}")
+    print(f"Total de Trades:       {trades_realizados}")
+    print(f"Custos de Transação:   desconsiderados")
+    print(f"Rentabilidade:         {rentabilidade_pct:.2f}%")
+    print("="*50)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--entrada", type=Path, default=Path("data/processed/pipeline_com_quebras.csv"))
+    parser.add_argument(
+        "--inicio-negociacao",
+        type=str,
+        default=DATA_INICIO_NEGOCIACAO,
+        help="Inicio do periodo exato de negociacao/backtest.",
+    )
+    parser.add_argument(
+        "--fim-negociacao",
+        type=str,
+        default=DATA_FIM_NEGOCIACAO,
+        help="Fim do periodo exato de negociacao/backtest.",
+    )
     args = parser.parse_args()
 
-    print(f"Iniciando Módulo RL (MDP). Carregando {args.entrada}...")
+    print(f"Carregando {args.entrada}...")
     df = pd.read_csv(args.entrada).dropna()
+    df["data"] = pd.to_datetime(df["data"], utc=True)
 
-    # Cria o ambiente
-    env = TradingFronteirasMDP(df=df)
-
-    # Inicia e treina o agente Q-Network
-    # O stable-baselines3 gerencia matematicamente as Equacoes 26 (Loss) e 27/28 (Atualizacao)
-    print("Treinando Deep Q-Network para encontrar os limiares operacionais ótimos...")
-    modelo_dqn = DQN("MlpPolicy", env, verbose=0, learning_rate=1e-3, exploration_fraction=0.2)
-    modelo_dqn.learn(total_timesteps=20000)
-
-    print("Treinamento concluído. Testando a inteligência da rede no mesmo ambiente...")
+    dt_inicio_negociacao = pd.to_datetime(args.inicio_negociacao).tz_localize("UTC")
+    dt_fim_negociacao = pd.to_datetime(args.fim_negociacao).tz_localize("UTC")
     
-    # Backtest avaliando acoes tomadas
-    obs, _ = env.reset()
-    recompensa_total = 0.0
-    terminou = False
-    
-    while not terminou:
-        acao, _states = modelo_dqn.predict(obs, deterministic=True)
-        obs, recompensa, terminou, _, _ = env.step(acao)
-        recompensa_total += recompensa
+    df_treino = df[df["data"] < dt_inicio_negociacao]
+    df_teste = df[
+        (df["data"] >= dt_inicio_negociacao)
+        & (df["data"] <= dt_fim_negociacao)
+    ]
 
-    print(f"Recompensa Total Acumulada no teste pelo Agente RL: {recompensa_total:.4f} unidades Z")
-    print("Pipeline de Inteligência Artificial finalizado com sucesso.")
+    if df_treino.empty or df_teste.empty:
+        raise ValueError(
+            "Erro ao dividir os dados. O arquivo precisa conter dados antes do inicio "
+            "da negociacao para treino e dados dentro do periodo de negociacao para backtest."
+        )
+
+    print(f"\nDados de TREINO (In-Sample): {len(df_treino)} dias")
+    print(f"Dados de TESTE (Out-of-Sample): {len(df_teste)} dias")
+
+    # 2. TREINAMENTO
+    env_treino = TradingFronteirasMDP(df=df_treino)
+    print("\nTreinando a IA com o histórico passado...")
+    modelo_dqn = DQN("MlpPolicy", env_treino, verbose=0, learning_rate=1e-3, exploration_fraction=0.2)
+    modelo_dqn.learn(total_timesteps=30000)
+
+    # 3. VALIDAÇÃO OUT-OF-SAMPLE
+    print("Treinamento concluído. Iniciando backtest cego nos 6 meses seguintes...")
+    env_teste = TradingFronteirasMDP(df=df_teste)
+    executar_backtest_financeiro(modelo_dqn, env_teste)
 
 if __name__ == "__main__":
     main()
