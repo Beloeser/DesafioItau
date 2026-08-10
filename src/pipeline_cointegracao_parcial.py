@@ -119,7 +119,9 @@ def calcular_parametros_dinamicos(spread: pd.Series, janela: int) -> pd.DataFram
     var_rw = var_rw.clip(lower=1e-6)
 
     parametros = pd.DataFrame({"rho": rho, "var_mr": var_mr, "var_rw": var_rw})
-    return parametros.bfill().ffill()
+    # Sem bfill: bfill copiava parametros FUTUROS para o aquecimento (look-ahead).
+    # As barras iniciais ficam NaN e sao tratadas de forma neutra no filtro.
+    return parametros.ffill()
 
 
 def filtro_kalman_cointegracao_parcial(spread: pd.Series, parametros: pd.DataFrame, var_medicao: float = 1e-4) -> pd.DataFrame:
@@ -136,6 +138,15 @@ def filtro_kalman_cointegracao_parcial(spread: pd.Series, parametros: pd.DataFra
         rho = parametros["rho"].iloc[i]
         var_mr = parametros["var_mr"].iloc[i]
         var_rw = parametros["var_rw"].iloc[i]
+
+        # Aquecimento sem bfill: parametros NaN viram valores neutros ate a
+        # primeira janela completa (essas barras sao descartadas no recorte).
+        if not np.isfinite(rho):
+            rho = 0.0
+        if not np.isfinite(var_mr) or var_mr <= 0:
+            var_mr = 1e-6
+        if not np.isfinite(var_rw) or var_rw <= 0:
+            var_rw = 1e-6
 
         F = np.array([[rho, 0.0], [0.0, 1.0]])
         Q = np.array([[var_mr, 0.0], [0.0, var_rw]])

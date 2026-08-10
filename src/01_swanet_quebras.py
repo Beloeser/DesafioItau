@@ -140,7 +140,9 @@ def main():
     # Realinha as probabilidades de volta ao DataFrame original
     coluna_prob = np.full(len(df), np.nan)
     coluna_prob[seq_length : seq_length + len(probabilidades)] = probabilidades
-    df["prob_quebra"] = pd.Series(coluna_prob).ffill().bfill()
+    # Sem bfill: o inicio da serie (antes da primeira janela) recebe 0.5
+    # (incerteza maxima) em vez de copiar uma previsao futura (look-ahead).
+    df["prob_quebra"] = pd.Series(coluna_prob).ffill().fillna(0.5)
 
     args.saida.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(args.saida, index=False)

@@ -72,6 +72,18 @@ def argumentos() -> argparse.Namespace:
         action="store_true",
         help="Tambem salva pares reprovados em um arquivo *_todos.csv.",
     )
+    parser.add_argument(
+        "--inicio-formacao",
+        type=str,
+        default=DATA_INICIO_FORMACAO,
+        help="Inicio do periodo usado no teste de cointegracao.",
+    )
+    parser.add_argument(
+        "--fim-formacao",
+        type=str,
+        default=DATA_FIM_FORMACAO,
+        help="Fim do periodo usado no teste de cointegracao.",
+    )
     return parser.parse_args()
 
 
@@ -189,14 +201,14 @@ def main() -> pd.DataFrame:
 
         print(
             f"[{indice}/{len(arquivos)}] Testando setor {arquivo.stem} "
-            f"de {DATA_INICIO_FORMACAO or 'inicio'} ate {DATA_FIM_FORMACAO or 'fim'}..."
+            f"de {args.inicio_formacao or 'inicio'} ate {args.fim_formacao or 'fim'}..."
         )
         tabela = testar_setor(
             arquivo,
             args.coluna_preco,
             args.min_observacoes,
-            DATA_INICIO_FORMACAO,
-            DATA_FIM_FORMACAO,
+            args.inicio_formacao,
+            args.fim_formacao,
         )
         print(f"  {len(tabela):,} regressao(oes) Engle-Granger avaliadas.")
         tabelas.append(tabela)
