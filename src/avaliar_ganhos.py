@@ -2,15 +2,16 @@
 
 Nao altera nenhuma etapa do pipeline: le o CSV salvo por
 ``pipeline_cointegracao_parcial.py`` (ou ``01_swanet_quebras.py``) e simula o
-resultado financeiro APENAS no periodo de negociacao, com execucao no dia
-seguinte ao sinal (sem look-ahead).
+resultado financeiro APENAS no periodo de negociacao.
 
-Modelo de PnL:
-    - posicao efetiva no dia t = sinal do fechamento de t-1;
-    - long spread  (+1): compra Y, vende hedge*X;
-    - short spread (-1): vende Y, compra hedge*X;
-    - tamanho fixo: metade do capital na perna Y no primeiro dia;
-    - custo opcional (taxa one-way sobre o notional movimentado).
+Modelo de PnL (padrao ``--execucao abertura``):
+    - sinal calculado apos o close de t-1;
+    - execucao na abertura do dia t (precos de abertura em data/raw/setores/);
+    - posicao efetiva no dia t = sinal de t-1;
+    - sem usar informacao futura (nao e look-ahead classico).
+
+Modo legado ``--execucao fechamento``:
+    - assume entrada no close de t-1 (otimista; comparavel ao Luiz antigo).
 
 Uso:
     python3 src/avaliar_ganhos.py --entrada data/processed/pipeline_com_quebras.csv
@@ -25,6 +26,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from execucao_pnl import (
+    carregar_spread_abertura,
+    pnl_diario_abertura,
+    pnl_diario_fechamento,
+)
 from periodos import DATA_FIM_NEGOCIACAO, DATA_INICIO_NEGOCIACAO
 
 
@@ -50,20 +56,38 @@ def simular_ganhos(
     coluna_sinal: str = "sinal",
     capital: float = 100_000.0,
     taxa: float = 0.0,
+    execucao: str = "abertura",
+    dados_setores: Path | None = None,
 ) -> tuple[pd.DataFrame, dict]:
     """Simula PnL em R$ no DataFrame ja recortado para o periodo de negociacao."""
+    if execucao not in ("abertura", "fechamento"):
+        raise ValueError("execucao deve ser 'abertura' ou 'fechamento'")
+
     dados = df.reset_index(drop=True).copy()
     preco_y = dados[ativo_y].astype(float)
     preco_x = dados[ativo_x].astype(float)
-    spread = dados["spread_observado"].astype(float)
+    spread = dados["spread_observado"].astype(float).to_numpy()
 
-    # Execucao t+1: sinal do fechamento de ontem vira posicao de hoje.
-    posicao = dados[coluna_sinal].fillna(0).astype(int).shift(1).fillna(0).astype(int)
+    # Sinal de ontem vira posicao de hoje (decisao apos close de t-1).
+    posicao = (
+        dados[coluna_sinal].fillna(0).astype(int).shift(1).fillna(0).astype(int)
+    )
+    pos_np = posicao.to_numpy()
 
     n_y = (capital / 2.0) / max(float(preco_y.iloc[0]), 1e-9)
     n_x = abs(hedge) * n_y
 
-    pnl_bruto = posicao * n_y * spread.diff().fillna(0.0)
+    if execucao == "abertura":
+        spread_open = carregar_spread_abertura(
+            dados, ativo_y, ativo_x, hedge, dados_setores=dados_setores
+        )
+        pnl_bruto = pd.Series(
+            pnl_diario_abertura(pos_np, spread, spread_open, n_y), index=dados.index
+        )
+    else:
+        pnl_bruto = pd.Series(
+            pnl_diario_fechamento(pos_np, spread, n_y), index=dados.index
+        )
 
     notional = n_y * preco_y + n_x * preco_x
     mudanca = posicao.diff().abs().fillna(abs(float(posicao.iloc[0])))
@@ -110,6 +134,7 @@ def simular_ganhos(
         "dias_posicionado_pct": float((posicao != 0).mean() * 100),
         "acoes_y": n_y,
         "acoes_x": n_x,
+        "execucao": execucao,
     }
 
     dados["posicao"] = posicao
@@ -141,6 +166,18 @@ def main() -> None:
         help="Cenarios de custo one-way (padrao: 0 e 8 bps).",
     )
     parser.add_argument("--saida", type=Path, default=None)
+    parser.add_argument(
+        "--execucao",
+        choices=("abertura", "fechamento"),
+        default="abertura",
+        help="abertura=executa no open do dia do sinal (padrao); fechamento=modo legado.",
+    )
+    parser.add_argument(
+        "--dados-setores",
+        type=Path,
+        default=Path("data/raw/setores"),
+        help="CSV com coluna abertura (Yahoo).",
+    )
     args = parser.parse_args()
 
     df, ativo_y, ativo_x, hedge = carregar_pipeline(args.entrada)
@@ -155,6 +192,7 @@ def main() -> None:
     print(f"GANHOS — {ativo_y} x {ativo_x} | hedge={hedge:.4f}")
     print(f"Sinal: '{args.coluna_sinal}' | Negociacao: {inicio.date()} a {fim.date()}")
     print(f"Dias uteis: {len(negociacao)} | Capital: R$ {args.capital:,.0f}")
+    print(f"Execucao: {args.execucao}")
     print("=" * 62)
 
     linhas_resumo = []
@@ -167,6 +205,8 @@ def main() -> None:
             coluna_sinal=args.coluna_sinal,
             capital=args.capital,
             taxa=taxa,
+            execucao=args.execucao,
+            dados_setores=args.dados_setores,
         )
         rotulo = "SEM CUSTOS" if taxa == 0 else f"CUSTO {taxa * 1e4:.0f} bps one-way"
         print(f"\n--- {rotulo} ---")
