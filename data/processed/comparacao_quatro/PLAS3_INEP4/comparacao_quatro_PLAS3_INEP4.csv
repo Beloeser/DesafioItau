@@ -1,0 +1,5 @@
+par,estrategia,coluna,branch,pnl_liquido,retorno_pct,sharpe,max_dd_pct,pos_pct,trades,limiar_formacao
+PLAS3/INEP4,luiz_limiar_1.25,sinal,Luiz,2199.01,2.2,0.281,-4.782,11.6,9,1.25
+PLAS3/INEP4,luiz_calibrado_1.25,sinal_calibrado,Luiz-new,2199.01,2.2,0.281,-4.782,11.6,9,1.25
+PLAS3/INEP4,finrl_puro_lag1,sinal_finrl,Luiz-finrl,20117.31,20.12,0.776,-14.215,82.0,23,
+PLAS3/INEP4,finrl_sobre_1.25,sinal_hibrido,Luiz-new_finrl,9436.18,9.44,0.905,-4.728,8.8,6,

@@ -1,0 +1,5 @@
+par,estrategia,coluna,branch,pnl_liquido,retorno_pct,sharpe,max_dd_pct,pos_pct,trades,limiar_formacao
+RPAD5/BMIN4,luiz_limiar_1.25,sinal,Luiz,6643.57,6.64,1.433,-1.866,7.2,9,1.25
+RPAD5/BMIN4,luiz_calibrado_1.75,sinal_calibrado,Luiz-new,-7978.16,-7.98,-0.82,-10.338,6.4,8,1.75
+RPAD5/BMIN4,finrl_puro_lag1,sinal_finrl,Luiz-finrl,-1092.77,-1.09,-0.041,-21.265,96.4,9,
+RPAD5/BMIN4,finrl_sobre_1.25,sinal_hibrido,Luiz-new_finrl,8907.74,8.91,0.929,-0.823,5.2,10,

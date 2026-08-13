@@ -1,0 +1,4 @@
+estrategia,pnl_liquido,retorno_pct,sharpe,max_dd_pct,pos_pct,trades,limiar_formacao
+luiz_limiar_1.25,2199.01,2.2,0.281,-4.782,11.6,9,
+luiz_calibrado_1.25,2199.01,2.2,0.281,-4.782,11.6,9,1.25
+finrl_honesto_lag1_abertura,4989.42,4.99,0.178,-21.3,98.0,5,

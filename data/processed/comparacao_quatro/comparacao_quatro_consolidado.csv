@@ -1,0 +1,13 @@
+par,estrategia,coluna,branch,pnl_liquido,retorno_pct,sharpe,max_dd_pct,pos_pct,trades,limiar_formacao
+PLAS3/INEP4,luiz_limiar_1.25,sinal,Luiz,2199.01,2.2,0.281,-4.782,11.6,9,1.25
+PLAS3/INEP4,luiz_calibrado_1.25,sinal_calibrado,Luiz-new,2199.01,2.2,0.281,-4.782,11.6,9,1.25
+PLAS3/INEP4,finrl_puro_lag1,sinal_finrl,Luiz-finrl,20117.31,20.12,0.776,-14.215,82.0,23,
+PLAS3/INEP4,finrl_sobre_1.25,sinal_hibrido,Luiz-new_finrl,9436.18,9.44,0.905,-4.728,8.8,6,
+PLAS3/INEP3,luiz_limiar_1.25,sinal,Luiz,12768.85,12.77,1.139,-7.797,29.6,22,1.25
+PLAS3/INEP3,luiz_calibrado_1.75,sinal_calibrado,Luiz-new,10125.27,10.13,1.032,-7.969,19.6,19,1.75
+PLAS3/INEP3,finrl_puro_lag1,sinal_finrl,Luiz-finrl,-52033.02,-52.03,-1.738,-59.544,98.8,3,
+PLAS3/INEP3,finrl_sobre_1.25,sinal_hibrido,Luiz-new_finrl,7816.62,7.82,0.598,-6.932,4.4,8,
+RPAD5/BMIN4,luiz_limiar_1.25,sinal,Luiz,6643.57,6.64,1.433,-1.866,7.2,9,1.25
+RPAD5/BMIN4,luiz_calibrado_1.75,sinal_calibrado,Luiz-new,-7978.16,-7.98,-0.82,-10.338,6.4,8,1.75
+RPAD5/BMIN4,finrl_puro_lag1,sinal_finrl,Luiz-finrl,-1092.77,-1.09,-0.041,-21.265,96.4,9,
+RPAD5/BMIN4,finrl_sobre_1.25,sinal_hibrido,Luiz-new_finrl,8907.74,8.91,0.929,-0.823,5.2,10,

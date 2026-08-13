@@ -1,0 +1,24 @@
+{
+  "par": "PLAS3/INEP4",
+  "pipeline": "/home/rafaelmachado18/itau/DesafioItau/data/processed/comparacao_quatro/PLAS3_INEP4/pipeline_com_quebras.csv",
+  "formacao": [
+    "2022-01-01",
+    "2024-12-31"
+  ],
+  "oos": [
+    "2025-01-01",
+    "2026-01-01"
+  ],
+  "execucao": "abertura",
+  "taxa": 0.0008,
+  "limiar_calibrado": 1.25,
+  "finrl": {
+    "lag": 1,
+    "timesteps": 50000,
+    "seed": 42
+  },
+  "hibrido": {
+    "timesteps": 30000,
+    "seed": 42
+  }
+}

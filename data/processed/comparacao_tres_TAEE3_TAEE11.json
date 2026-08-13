@@ -1,0 +1,20 @@
+{
+  "par": "TAEE3/TAEE11",
+  "pipeline": "data/processed/pipeline_com_quebras_TAEE_causal.csv",
+  "formacao": [
+    "2022-01-01",
+    "2024-12-31"
+  ],
+  "oos": [
+    "2025-01-01",
+    "2026-01-01"
+  ],
+  "execucao": "abertura",
+  "taxa": 0.0008,
+  "finrl": {
+    "lag": 1,
+    "timesteps": 50000,
+    "seed": 42
+  },
+  "limiar_calibrado": 1.0
+}

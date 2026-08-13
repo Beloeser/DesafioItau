@@ -1,0 +1,25 @@
+{
+  "par": "PLAS3/INEP4",
+  "limiar_escolhido": 1.25,
+  "limiar_referencia": 1.25,
+  "formacao": [
+    "2022-01-01",
+    "2024-12-31"
+  ],
+  "negociacao": [
+    "2025-01-01",
+    "2026-01-01"
+  ],
+  "execucao": "abertura",
+  "criterio": "calmar",
+  "grid": [
+    0.75,
+    1.0,
+    1.25,
+    1.5,
+    1.75,
+    2.0,
+    2.25,
+    2.5
+  ]
+}
