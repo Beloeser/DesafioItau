@@ -13,8 +13,11 @@ Saida:
   data/processed/comparacao_tres_<PAR>.json  (metadados)
 
 Uso:
+  python3 scripts/run_comparar_tres.py --par PLAS3 INEP4
   python3 scripts/run_comparar_tres.py --par TAEE3 TAEE11 --setor energia_eletrica
   python3 scripts/run_comparar_tres.py --entrada data/processed/pipeline_com_quebras_TAEE_causal.csv
+
+  --setor e opcional: se errar (ex. agro vs industria), o script corrige pelo CSV.
 """
 
 from __future__ import annotations
@@ -55,7 +58,20 @@ def rodar(cmd: list[str], use_venv: bool = False) -> None:
     subprocess.run([exe, *cmd], cwd=RAIZ, check=True)
 
 
-def pipeline_completo(setor: str, y: str, x: str, pasta: Path) -> Path:
+def resolver_setor(coint: Path, y: str, x: str, setor_cli: str | None) -> str:
+    """Busca setor no CSV de cointegracao; evita erro agro vs industria."""
+    pares = pd.read_csv(coint)
+    filtro = pares["Ativo Y"].eq(y) & pares["Ativo X"].eq(x)
+    hits = pares[filtro]
+    if hits.empty:
+        raise ValueError(f"Par {y}/{x} nao encontrado em {coint}")
+    setor_csv = str(hits.iloc[0]["Setor"])
+    if setor_cli and setor_cli != setor_csv:
+        print(f"  [aviso] --setor {setor_cli!r} ignorado; par esta em {setor_csv!r}")
+    return setor_csv
+
+
+def pipeline_completo(setor: str | None, y: str, x: str, pasta: Path) -> Path:
     pasta.mkdir(parents=True, exist_ok=True)
     coint = pasta / "cointegracao.csv"
     parcial = pasta / "pipeline_parcial.csv"
@@ -67,10 +83,12 @@ def pipeline_completo(setor: str, y: str, x: str, pasta: Path) -> Path:
         "--fim-formacao", DATA_FIM_FORMACAO,
         "--saida", str(coint),
     ])
+    setor_ok = resolver_setor(coint, y, x, setor)
+    print(f"  Par {y}/{x} -> setor '{setor_ok}'")
     rodar([
         str(SRC / "pipeline_cointegracao_parcial.py"),
         "--cointegracao", str(coint),
-        "--setor", setor, "--ativo-y", y, "--ativo-x", x,
+        "--setor", setor_ok, "--ativo-y", y, "--ativo-x", x,
         "--inicio-formacao", DATA_INICIO_FORMACAO,
         "--fim-formacao", DATA_FIM_FORMACAO,
         "--inicio-negociacao", DATA_INICIO_NEGOCIACAO,
@@ -112,7 +130,7 @@ def metricas(df, y, x, h, col: str) -> dict:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--par", nargs=2, metavar=("Y", "X"))
-    p.add_argument("--setor", default="energia_eletrica")
+    p.add_argument("--setor", default=None, help="Opcional; auto-detecta pelo CSV de cointegracao")
     p.add_argument("--entrada", type=Path, default=None, help="CSV causal pronto")
     p.add_argument("--skip-pipeline", action="store_true")
     p.add_argument("--timesteps", type=int, default=50_000)
@@ -128,7 +146,7 @@ def main() -> None:
         y, x = args.par
         slug = f"{y}_{x}"
         pasta = RAIZ / "data/processed" / f"comparacao_{slug}"
-        quebras = pasta / "pipeline_com_quebras_causal.csv"
+        quebras = pasta / "pipeline_com_quebras.csv"
         if not args.skip_pipeline or not quebras.exists():
             quebras = pipeline_completo(args.setor, y, x, pasta)
 
