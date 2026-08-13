@@ -34,7 +34,7 @@ def base_sintetica(n: int = 30) -> pd.DataFrame:
 
 
 def testa_contrato_gym() -> None:
-    env = PairsTradingFinRLEnv(base_sintetica(), "Y", "X", 1.0, taxa=0.0)
+    env = PairsTradingFinRLEnv(base_sintetica(), "Y", "X", 1.0, taxa=0.0, execucao="fechamento")
     obs, _ = env.reset()
     assert obs.shape == (4,)
     assert env.action_space.n == 3
@@ -49,7 +49,7 @@ def testa_recompensa_igual_pnl() -> None:
 
     df = base_sintetica()
     capital = 100_000.0
-    env = PairsTradingFinRLEnv(df, "Y", "X", 1.0, capital=capital, taxa=0.0)
+    env = PairsTradingFinRLEnv(df, "Y", "X", 1.0, capital=capital, taxa=0.0, execucao="fechamento")
 
     rng = np.random.default_rng(11)
     acoes = rng.integers(0, 3, len(df) - 1)
@@ -66,7 +66,7 @@ def testa_recompensa_igual_pnl() -> None:
 
     df_aval = df.copy()
     df_aval["sinal"] = posicoes
-    _, m = simular_ganhos(df_aval, "Y", "X", 1.0, capital=capital, taxa=0.0)
+    _, m = simular_ganhos(df_aval, "Y", "X", 1.0, capital=capital, taxa=0.0, execucao="fechamento")
     assert abs(total_env - m["pnl_liquido"]) < 1e-6, (total_env, m["pnl_liquido"])
     print("OK  recompensa do env = PnL do avaliar_ganhos (mesma matematica)")
 
@@ -74,7 +74,7 @@ def testa_recompensa_igual_pnl() -> None:
 def testa_execucao_t_mais_1() -> None:
     """Acao no dia t so recebe o retorno de t -> t+1 (sem look-ahead)."""
     df = base_sintetica()
-    env = PairsTradingFinRLEnv(df, "Y", "X", 1.0, taxa=0.0)
+    env = PairsTradingFinRLEnv(df, "Y", "X", 1.0, taxa=0.0, execucao="fechamento")
     env.reset()
     _, recompensa, _, _, _ = env.step(1)  # long no dia 0
     dspread = df["spread_observado"].iloc[1] - df["spread_observado"].iloc[0]
@@ -86,7 +86,7 @@ def testa_execucao_t_mais_1() -> None:
 def testa_custo_no_treino() -> None:
     """Com taxa > 0, girar posicao custa; ficar flat nao custa nada."""
     df = base_sintetica()
-    env = PairsTradingFinRLEnv(df, "Y", "X", 1.0, taxa=0.01)
+    env = PairsTradingFinRLEnv(df, "Y", "X", 1.0, taxa=0.01, execucao="fechamento")
     env.reset()
     _, recompensa_flat, _, _, _ = env.step(0)
     assert recompensa_flat == 0.0

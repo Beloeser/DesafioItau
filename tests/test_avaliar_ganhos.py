@@ -33,7 +33,7 @@ def base_sintetica() -> pd.DataFrame:
 def testa_execucao_t_mais_1() -> None:
     """Sinal de hoje so captura o retorno de AMANHA (sem look-ahead)."""
     df = base_sintetica()
-    dados, m = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.0)
+    dados, m = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.0, execucao="fechamento")
     # n_y = 50/10 = 5 acoes. Posicao efetiva (shift): dias 1-3 long.
     # PnL = 5 * (dspread dia1 + dia2 + dia3) = 5 * (0 + 1 + 1) = 10.
     assert abs(m["pnl_liquido"] - 10.0) < 1e-9, m["pnl_liquido"]
@@ -44,7 +44,7 @@ def testa_lookahead_zero() -> None:
     """Sinal ligado SO no ultimo dia nao pode gerar PnL nenhum."""
     df = base_sintetica()
     df["sinal"] = [0, 0, 0, 0, 0, 1]
-    _, m = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.0)
+    _, m = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.0, execucao="fechamento")
     assert m["pnl_liquido"] == 0.0
     print("OK  sinal no ultimo dia gera PnL zero (sem vazamento)")
 
@@ -52,8 +52,8 @@ def testa_lookahead_zero() -> None:
 def testa_custos_por_mudanca() -> None:
     """Custo cobrado a cada mudanca de posicao (abre e fecha)."""
     df = base_sintetica()
-    _, sem = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.0)
-    _, com = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.01)
+    _, sem = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.0, execucao="fechamento")
+    _, com = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.01, execucao="fechamento")
     # 2 mudancas (0->1 no dia 1; 1->0 no dia 4). Notional = 5*Y + 5*X.
     esperado = 0.01 * (5 * 10.0 + 5 * 5.0) + 0.01 * (5 * 13.0 + 5 * 5.0)
     assert abs((sem["pnl_liquido"] - com["pnl_liquido"]) - esperado) < 1e-9
@@ -67,7 +67,7 @@ def testa_short() -> None:
     df["spread_observado"] = [8.0, 8.0, 7.0, 6.0, 5.0, 5.0]
     df["Y"] = [13.0, 13.0, 12.0, 11.0, 10.0, 10.0]
     df["sinal"] = [-1, -1, -1, 0, 0, 0]
-    _, m = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.0)
+    _, m = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.0, execucao="fechamento")
     # n_y = 50/13; PnL = -n_y * (0 -1 -1) = +2*n_y
     esperado = 2 * (50.0 / 13.0)
     assert abs(m["pnl_liquido"] - esperado) < 1e-9
@@ -76,7 +76,7 @@ def testa_short() -> None:
 
 def testa_trades_e_winrate() -> None:
     df = base_sintetica()
-    _, m = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.0)
+    _, m = simular_ganhos(df, "Y", "X", 1.0, capital=100.0, taxa=0.0, execucao="fechamento")
     assert m["trades_fechados"] == 1
     assert m["win_rate_pct"] == 100.0
     print("OK  contagem de trades e win rate")

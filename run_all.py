@@ -213,8 +213,8 @@ def main() -> None:
     inicio = pd.Timestamp(t2, tz="UTC")
     fim = pd.Timestamp(t3, tz="UTC")
     neg = df_base[(df_base["data"] >= inicio) & (df_base["data"] <= fim)]
-    _, m_base_sem = simular_ganhos(neg, ay, ax, hedge, "sinal", args.capital, 0.0)
-    _, m_base_com = simular_ganhos(neg, ay, ax, hedge, "sinal", args.capital, 0.0008)
+    _, m_base_sem = simular_ganhos(neg, ay, ax, hedge, "sinal", args.capital, 0.0, execucao="abertura")
+    _, m_base_com = simular_ganhos(neg, ay, ax, hedge, "sinal", args.capital, 0.0008, execucao="abertura")
     ok(f"Baseline sem custo: PnL R$ {m_base_sem['pnl_liquido']:,.0f} | Sharpe {m_base_sem['sharpe_anualizado']:.2f}")
     ok(f"Baseline 8 bps    : PnL R$ {m_base_com['pnl_liquido']:,.0f} | Sharpe {m_base_com['sharpe_anualizado']:.2f}")
 
@@ -255,11 +255,13 @@ def main() -> None:
             "--fim-negociacao", t3,
             "--timesteps", str(args.timesteps),
             "--capital", str(args.capital),
+            "--features-lag", "1",
+            "--execucao", "abertura",
         ], precisa_finrl=True)
 
         df_fin, _, _, _ = carregar_pipeline(finrl_csv)
-        _, m_fin_sem = simular_ganhos(df_fin, ay, ax, hedge, "sinal_finrl", args.capital, 0.0)
-        _, m_fin_com = simular_ganhos(df_fin, ay, ax, hedge, "sinal_finrl", args.capital, 0.0008)
+        _, m_fin_sem = simular_ganhos(df_fin, ay, ax, hedge, "sinal_finrl", args.capital, 0.0, execucao="abertura")
+        _, m_fin_com = simular_ganhos(df_fin, ay, ax, hedge, "sinal_finrl", args.capital, 0.0008, execucao="abertura")
         ok(f"FinRL sem custo: PnL R$ {m_fin_sem['pnl_liquido']:,.0f} | Sharpe {m_fin_sem['sharpe_anualizado']:.2f}")
         ok(f"FinRL 8 bps      : PnL R$ {m_fin_com['pnl_liquido']:,.0f} | Sharpe {m_fin_com['sharpe_anualizado']:.2f}")
         linhas_resumo.extend([
